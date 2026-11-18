@@ -62,7 +62,7 @@
   }
   button:hover { border-color: #3b3b47; }
   button.primary { background: var(--accent); color: #06210f; border: 0; font-weight: 650; }
-  button.primary:disabled { opacity: .45; cursor: default; }
+  button.primary:disabled, button:disabled { opacity: .45; cursor: default; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .row > * { flex: 1 1 auto; }
   .row.tight > * { flex: 0 0 auto; }
@@ -98,7 +98,8 @@
 <header>
   <div class="brand">Apex <span>Media Gen</span></div>
   <div class="status" id="status">Ready</div>
-  <div class="tabs">
+  <input id="editor-url" type="text" placeholder="Apex Editor URL (optional)" style="max-width:230px;margin-left:auto" />
+  <div class="tabs" style="margin-left:0">
     <button class="tab" id="tab-video" aria-selected="true">Video</button>
     <button class="tab" id="tab-voice" aria-selected="false">Voice</button>
     <button class="tab" id="tab-music" aria-selected="false">Music</button>
@@ -118,6 +119,7 @@
             <button class="primary" id="play-btn">Play</button>
             <button id="stop-btn">Stop</button>
             <button id="record-btn">Record video</button>
+            <button id="send-video">Send to Apex Editor</button>
             <span class="status" id="time-label">0.0s</span>
           </div>
           <div class="meter"><div id="progress"></div></div>
@@ -173,6 +175,7 @@
         <textarea id="script">Welcome to Apex. Everything here is yours, running on your own device.</textarea>
         <div class="row tight" style="margin-top:10px">
           <button class="primary" id="speak-btn">Speak</button>
+          <button id="test-voice">Test</button>
           <button id="pause-btn">Pause / resume</button>
           <button id="cancel-btn">Stop</button>
         </div>
@@ -211,6 +214,7 @@
         <div class="row tight" style="margin-top:12px">
           <button class="primary" id="gen-btn">Generate</button>
           <button id="wav-btn" disabled>Download WAV</button>
+          <button id="send-audio" disabled>Send to Apex Editor</button>
         </div>
         <div class="out" id="music-out"></div>
       </div>
@@ -279,6 +283,8 @@ let rafId = null;
 let recorder = null;
 let audioBuffer = null;     // decoded music/voiceover
 let audioCtx = null;
+let lastVideoBlob = null;   // kept for the handoff, since the download may be gone
+let lastVideoMime = "";
 
 const FADE = 0.45;          // seconds of black between scenes
 
@@ -577,6 +583,8 @@ $("record-btn").addEventListener("click", () => {
     if (!chunks.length) { $("video-out").textContent = "Nothing was recorded."; return; }
     const blob = new Blob(chunks, { type: mime.split(";")[0] });
     const ext = mime.startsWith("video/mp4") ? "mp4" : "webm";
+    lastVideoBlob = blob;
+    lastVideoMime = ext;
     download("apex-media-" + Date.now() + "." + ext, blob);
     $("video-out").textContent = "Saved " + (blob.size / 1048576).toFixed(1) + " MB as ." + ext +
       (ext === "webm" ? "\nWebM plays in Chrome, Android, Firefox and VLC. Some editors want MP4." : "");
@@ -642,31 +650,73 @@ if (synth) {
   synth.addEventListener("voiceschanged", loadVoices);
 }
 
-$("speak-btn").addEventListener("click", () => {
+/**
+ * Speak some text. Must be called synchronously from a click handler: Chrome on
+ * Android (and iOS before 16) refuse to start speech that is not tied to a user
+ * gesture, and a promise or setTimeout between the tap and speak() counts as
+ * "not tied to a gesture" on some builds.
+ */
+function speakText(text) {
   if (!synth) { alert("This browser has no speech engine."); return; }
-  synth.cancel();
-  const text = $("script").value.trim();
-  if (!text) return;
-  const utter = new SpeechSynthesisUtterance(text);
+  const trimmed = String(text || "").trim();
+  if (!trimmed) return;
+
+  // Stop anything already playing, then speak in the same tick.
+  try { synth.cancel(); } catch { /* some engines throw if idle */ }
+
+  const utter = new SpeechSynthesisUtterance(trimmed);
   const v = voices[Number($("voice-pick").value)];
   if (v) { utter.voice = v; utter.lang = v.lang; }
   utter.rate = Number($("rate").value) || 1;
   utter.pitch = Number($("pitch").value) || 1;
   utter.volume = Math.min(1, Math.max(0, Number($("volume").value)));
-  const words = text.split(/\s+/).length;
+
+  const words = trimmed.split(/\s+/).length;
+  const done = (message) => {
+    $("voice-out").textContent = message;
+    $("speak-btn").disabled = false;
+    setStatus("Ready");
+  };
+
   utter.onstart = () => {
     $("voice-out").textContent = "Speaking " + words + " words…";
     setStatus("Speaking");
   };
-  utter.onend = () => {
-    $("voice-out").textContent = "Finished. " + words + " words.";
-    setStatus("Ready");
-  };
+  utter.onend = () => done("Finished. " + words + " words.");
   utter.onerror = (e) => {
-    $("voice-out").textContent = "Speech stopped: " + (e.error || "unknown reason");
-    setStatus("Ready");
+    const reason = e.error || "unknown";
+    // "interrupted" and "canceled" are what you get when a second Speak press
+    // stops the first one. That is not an error worth alarming anyone about.
+    if (reason === "interrupted" || reason === "canceled") {
+      done("Stopped.");
+      return;
+    }
+    if (reason === "not-allowed") {
+      done("Android blocked the first attempt. Tap Speak again — the engine needs a second, direct tap.");
+      return;
+    }
+    if (reason === "synthesis-failed") {
+      done("The speech engine failed to start. On Android, make sure Google Text-to-speech is installed and has a voice downloaded.");
+      return;
+    }
+    done("Speech stopped: " + reason);
   };
-  synth.speak(utter);
+
+  $("speak-btn").disabled = true;
+  try {
+    synth.speak(utter);
+  } catch (err) {
+    done("Could not start speech: " + err.message);
+  }
+}
+
+$("speak-btn").addEventListener("click", () => {
+  speakText($("script").value);
+});
+
+$("test-voice").addEventListener("click", () => {
+  // Same path as Speak, one short line, so a phone can be checked in two taps.
+  speakText("This is the Apex voice test.");
 });
 
 $("pause-btn").addEventListener("click", () => {
@@ -677,6 +727,7 @@ $("pause-btn").addEventListener("click", () => {
 $("cancel-btn").addEventListener("click", () => {
   if (synth) synth.cancel();
   $("voice-out").textContent = "Stopped.";
+  $("speak-btn").disabled = false;
 });
 
 /* =============================== MUSIC =============================== */
@@ -810,6 +861,7 @@ async function generateTrack() {
   renderedBuffer = await offline.startRendering();
   $("player").src = URL.createObjectURL(new Blob([encodeWav(renderedBuffer)], { type: "audio/wav" }));
   $("wav-btn").disabled = false;
+  $("send-audio").disabled = false;
   const peak = peakLevel(renderedBuffer);
   $("music-out").textContent = "Done — " + seconds + "s, " + mood + ", " + bpm + " BPM, peak "
     + (peak * 100).toFixed(0) + "% of full scale.";
@@ -880,6 +932,129 @@ $("gen-btn").addEventListener("click", () => {
 $("wav-btn").addEventListener("click", () => {
   if (!renderedBuffer) return;
   download("apex-track-" + Date.now() + ".wav", new Blob([encodeWav(renderedBuffer)], { type: "audio/wav" }));
+});
+
+/* ========================= SEND TO APEX EDITOR ========================= */
+
+/*
+ * Apex Editor does not exist yet, so this cannot open an app that is not there.
+ * What it does instead, honestly:
+ *
+ *   1. writes the asset into IndexedDB on this origin, and
+ *   2. opens <editor-url>?handoff=<id> if you have configured a URL.
+ *
+ * The contract for the editor when it is built: open the "apex-handoff"
+ * database, read the "assets" store, look up the id from ?handoff=, and take
+ * { kind, name, mime, bytes, meta }. With no URL configured the asset is still
+ * saved and downloaded, and the app says so rather than silently doing nothing.
+ */
+
+const HANDOFF_DB = "apex-handoff";
+const HANDOFF_STORE = "assets";
+const EDITOR_URL_KEY = "apexstudio:editor-url";
+
+function openHandoffDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(HANDOFF_DB, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(HANDOFF_STORE)) {
+        db.createObjectStore(HANDOFF_STORE, { keyPath: "id" });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function putHandoff(record) {
+  const db = await openHandoffDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(HANDOFF_STORE, "readwrite");
+    tx.objectStore(HANDOFF_STORE).put(record);
+    tx.oncomplete = () => resolve(record.id);
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error("handoff write aborted"));
+  });
+}
+
+async function sendToEditor({ kind, blob, name, meta }) {
+  if (!blob) { alert("Make something first — there is nothing to send yet."); return; }
+  const id = "h" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const record = {
+    id,
+    createdAt: Date.now(),
+    kind,
+    name,
+    mime: blob.type || "application/octet-stream",
+    bytes: blob,
+    meta: meta || {},
+    source: "apex-media-gen",
+  };
+
+  try {
+    await putHandoff(record);
+  } catch (err) {
+    console.error(err);
+    alert("Could not hand the file over on this device: " + err.message);
+    return;
+  }
+
+  const configured = $("editor-url").value.trim();
+  if (configured) {
+    const url = configured + (configured.includes("?") ? "&" : "?") + "handoff=" + id;
+    window.open(url, "_blank", "noopener");
+    setStatus("Sent to Editor");
+    $("video-out").textContent = id;
+    $("music-out").textContent = "Sent as " + id + " — open " + configured;
+  } else {
+    // No editor to open: save the asset anyway and give the file back.
+    download(name, blob);
+    setStatus("Saved for the Editor");
+    const note =
+      "Saved as " + id + " on this device and downloaded. \n" +
+      "Apex Editor is not built yet, so there is nothing to open — put its URL in the box at the top when it exists.";
+    $("video-out").textContent = note;
+    $("music-out").textContent = note;
+  }
+}
+
+$("send-video").addEventListener("click", () => {
+  if (!lastVideoBlob) { alert("Record a video first, then send it."); return; }
+  sendToEditor({
+    kind: "video",
+    blob: lastVideoBlob,
+    name: "apex-montage-" + Date.now() + "." + lastVideoMime,
+    meta: {
+      scenes: scenes.length,
+      seconds: Math.round(totalDuration() * 10) / 10,
+      aspect: $("aspect").value,
+      size: canvas.width + "x" + canvas.height,
+      caption: $("caption").value.trim() || null,
+    },
+  });
+});
+
+$("send-audio").addEventListener("click", () => {
+  if (!renderedBuffer) { alert("Generate a track first, then send it."); return; }
+  sendToEditor({
+    kind: "audio",
+    blob: new Blob([encodeWav(renderedBuffer)], { type: "audio/wav" }),
+    name: "apex-track-" + Date.now() + ".wav",
+    meta: {
+      mood: $("mood").value,
+      bpm: Number($("tempo").value) || null,
+      seconds: Number(renderedBuffer.duration.toFixed(2)),
+      drums: $("drums").value === "on",
+    },
+  });
+});
+
+// Remember the editor URL so it survives a reload.
+$("editor-url").value = localStorage.getItem(EDITOR_URL_KEY) || "";
+$("editor-url").addEventListener("change", () => {
+  localStorage.setItem(EDITOR_URL_KEY, $("editor-url").value.trim());
+  setStatus("Editor URL saved");
 });
 
 /* ------------------------------- boot ------------------------------- */
