@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Apex Media Gen</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0b0d'/%3E%3Ctext x='16' y='23' font-family='sans-serif' font-size='18' font-weight='700' fill='%236ee7a8' text-anchor='middle'%3EA%3C/text%3E%3C/svg%3E" />
+<style>
+  :root {
+    --bg: #0b0b0d;
+    --panel: #141418;
+    --panel-2: #1b1b21;
+    --line: #2a2a33;
+    --ink: #e8e8ee;
+    --muted: #9a9aa8;
+    --accent: #6ee7a8;
+    --warn: #d9a33a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh;
+    background: var(--bg); color: var(--ink);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--panel);
+    position: sticky; top: 0; z-index: 5;
+  }
+  .brand { font-weight: 650; }
+  .brand span { color: var(--accent); }
+  .status { color: var(--muted); font-size: 12px; }
+  .tabs { display: flex; gap: 4px; margin-left: auto; }
+  .tab {
+    background: transparent; color: var(--muted); border: 1px solid transparent;
+    padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 13px;
+  }
+  .tab[aria-selected="true"] { background: var(--panel-2); color: var(--ink); border-color: var(--line); }
+
+  main { padding: 18px; max-width: 1080px; margin: 0 auto; }
+  .pane { display: none; }
+  .pane.on { display: block; }
+  .grid { display: grid; grid-template-columns: 1fr 320px; gap: 16px; align-items: start; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px; margin-bottom: 16px;
+  }
+  .card h2 { margin: 0 0 4px; font-size: 15px; }
+  .card p.hint { color: var(--muted); margin: 0 0 12px; font-size: 12.5px; }
+  label { display: block; color: var(--muted); font-size: 12px; margin: 10px 0 4px; }
+  input[type="text"], input[type="number"], select, textarea, input[type="file"] {
+    width: 100%; background: var(--panel-2); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+    font: inherit; font-size: 13px;
+  }
+  textarea { min-height: 120px; resize: vertical; }
+  button {
+    background: var(--panel-2); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 8px; padding: 7px 12px; cursor: pointer; font-size: 13px;
+  }
+  button:hover { border-color: #3b3b47; }
+  button.primary { background: var(--accent); color: #06210f; border: 0; font-weight: 650; }
+  button.primary:disabled { opacity: .45; cursor: default; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .row > * { flex: 1 1 auto; }
+  .row.tight > * { flex: 0 0 auto; }
+
+  canvas.preview {
+    width: 100%; background: #000; border-radius: 10px; border: 1px solid var(--line);
+    display: block;
+  }
+  .scenes { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .scene {
+    width: 92px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line);
+    background: var(--panel-2); position: relative;
+  }
+  .scene img { width: 100%; height: 60px; object-fit: cover; display: block; }
+  .scene .ctl { display: flex; gap: 2px; padding: 3px; }
+  .scene .ctl button { flex: 1; padding: 2px 0; font-size: 10px; border-radius: 4px; }
+  .scene .num {
+    position: absolute; top: 2px; left: 2px; background: rgba(0,0,0,.6);
+    color: #fff; font-size: 10px; padding: 0 4px; border-radius: 4px;
+  }
+  .warn {
+    border-left: 3px solid var(--warn); background: #241d0f; color: #e8c98a;
+    padding: 10px 12px; border-radius: 6px; font-size: 12.5px; margin: 0 0 14px;
+  }
+  .out { color: var(--muted); font-size: 12px; margin-top: 10px; white-space: pre-wrap; }
+  .meter { height: 6px; background: var(--panel-2); border-radius: 4px; overflow: hidden; margin-top: 10px; }
+  .meter > div { height: 100%; width: 0%; background: var(--accent); transition: width .2s; }
+  audio { width: 100%; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">Apex <span>Media Gen</span></div>
+  <div class="status" id="status">Ready</div>
+  <div class="tabs">
+    <button class="tab" id="tab-video" aria-selected="true">Video</button>
+    <button class="tab" id="tab-voice" aria-selected="false">Voice</button>
+    <button class="tab" id="tab-music" aria-selected="false">Music</button>
+  </div>
+</header>
+
+<main>
+  <!-- ------------------------------ VIDEO ------------------------------ -->
+  <section class="pane on" id="pane-video">
+    <div class="grid">
+      <div>
+        <div class="card">
+          <h2>Preview</h2>
+          <p class="hint">Nothing is uploaded. The video is drawn here, on this page, and recorded from it.</p>
+          <canvas id="canvas" class="preview" width="1280" height="720"></canvas>
+          <div class="row tight" style="margin-top:12px">
+            <button class="primary" id="play-btn">Play</button>
+            <button id="stop-btn">Stop</button>
+            <button id="record-btn">Record video</button>
+            <span class="status" id="time-label">0.0s</span>
+          </div>
+          <div class="meter"><div id="progress"></div></div>
+          <div class="out" id="video-out"></div>
+        </div>
+
+        <div class="card">
+          <h2>Scenes</h2>
+          <p class="hint">Add images in the order you want them. Each one drifts slowly — that movement is what stops a slideshow looking like a slideshow.</p>
+          <input type="file" id="images" accept="image/*" multiple />
+          <div class="scenes" id="scenes"></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <h2>Format</h2>
+          <label for="aspect">Shape</label>
+          <select id="aspect">
+            <option value="16:9">Landscape 16:9</option>
+            <option value="9:16">Vertical 9:16 (status, reels)</option>
+            <option value="1:1">Square 1:1</option>
+          </select>
+          <label for="res">Size</label>
+          <select id="res">
+            <option value="720">Everyday (720p)</option>
+            <option value="1080">Sharper (1080p)</option>
+          </select>
+          <label for="per-scene">Seconds per scene</label>
+          <input type="number" id="per-scene" value="4" min="1" max="20" step="0.5" />
+          <label for="caption">Caption for all scenes (optional)</label>
+          <input type="text" id="caption" placeholder="e.g. Lagos, 2026" />
+          <label for="audio-file">Music or voiceover file (optional)</label>
+          <input type="file" id="audio-file" accept="audio/*" />
+        </div>
+        <div class="card">
+          <div class="warn">
+            <b>Recording is real time.</b> A 30-second video takes about 30 seconds to record,
+            because the browser is capturing the canvas as it plays. Keep it under a minute or
+            two on a phone.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------ VOICE ------------------------------ -->
+  <section class="pane" id="pane-voice">
+    <div class="grid">
+      <div class="card">
+        <h2>Script</h2>
+        <p class="hint">Type what you want said. The device speaks it with its own installed voices — no key, no card, no upload.</p>
+        <textarea id="script">Welcome to Apex. Everything here is yours, running on your own device.</textarea>
+        <div class="row tight" style="margin-top:10px">
+          <button class="primary" id="speak-btn">Speak</button>
+          <button id="pause-btn">Pause / resume</button>
+          <button id="cancel-btn">Stop</button>
+        </div>
+        <div class="out" id="voice-out"></div>
+      </div>
+      <div>
+        <div class="card">
+          <h2>Delivery</h2>
+          <label for="voice-pick">Voice</label>
+          <select id="voice-pick"></select>
+          <label for="rate">Speed</label>
+          <input type="number" id="rate" value="1" min="0.5" max="2" step="0.05" />
+          <label for="pitch">Pitch</label>
+          <input type="number" id="pitch" value="1" min="0" max="2" step="0.05" />
+          <label for="volume">Volume</label>
+          <input type="number" id="volume" value="1" min="0" max="1" step="0.05" />
+        </div>
+        <div class="card">
+          <div class="warn">
+            <b>You can play it, not download it.</b> Browsers deliberately give no way to save
+            their speech output to a file — that would make free voice cloning trivial. To get an
+            audio file you need a speech service with an API, which is a different product.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------ MUSIC ------------------------------ -->
+  <section class="pane" id="pane-music">
+    <div class="grid">
+      <div class="card">
+        <h2>Generated track</h2>
+        <p class="hint">Made on the spot from oscillators and noise, then rendered to a real WAV you can keep. No samples, no licence, no upload.</p>
+        <audio id="player" controls></audio>
+        <div class="row tight" style="margin-top:12px">
+          <button class="primary" id="gen-btn">Generate</button>
+          <button id="wav-btn" disabled>Download WAV</button>
+        </div>
+        <div class="out" id="music-out"></div>
+      </div>
+      <div>
+        <div class="card">
+          <h2>Ingredients</h2>
+          <label for="mood">Mood</label>
+          <select id="mood">
+            <option value="calm">Calm / ambient</option>
+            <option value="upbeat">Upbeat</option>
+            <option value="dark">Dark</option>
+          </select>
+          <label for="tempo">Tempo (BPM)</label>
+          <input type="number" id="tempo" value="84" min="50" max="160" step="1" />
+          <label for="seconds">Length (seconds)</label>
+          <input type="number" id="seconds" value="30" min="5" max="180" step="5" />
+          <label for="drums">Drums</label>
+          <select id="drums">
+            <option value="on">With drums</option>
+            <option value="off">No drums</option>
+          </select>
+        </div>
+        <div class="card">
+          <div class="warn">
+            <b>This is synthesis, not a model.</b> It composes from a scale and a pattern —
+            which is why it works offline and costs nothing. A model that "makes music from a
+            description" needs a hosted service, and those are not card-free.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+"use strict";
+
+const $ = (id) => document.getElementById(id);
+const statusEl = $("status");
+function setStatus(t) { statusEl.textContent = t; }
+
+/* ------------------------------- tabs ------------------------------- */
+
+function selectTab(name) {
+  for (const t of ["video", "voice", "music"]) {
+    const on = t === name;
+    $("tab-" + t).setAttribute("aria-selected", String(on));
+    $("pane-" + t).classList.toggle("on", on);
+  }
+  if (name !== "video") stopTimeline();
+  if (name !== "voice" && "speechSynthesis" in window) window.speechSynthesis.cancel();
+}
+for (const t of ["video", "voice", "music"]) {
+  $("tab-" + t).addEventListener("click", () => selectTab(t));
+}
+
+/* =============================== VIDEO =============================== */
+
+const canvas = $("canvas");
+const ctx = canvas.getContext("2d");
+
+let scenes = [];            // { img, name, duration }
+let perScene = 4;
+let playing = false;
+let rafId = null;
+let recorder = null;
+let audioBuffer = null;     // decoded music/voiceover
+let audioCtx = null;
+
+const FADE = 0.45;          // seconds of black between scenes
+
+function sizeFor(aspect, res) {
+  const short = res === "1080" ? 1080 : 720;
+  if (aspect === "9:16") return { w: short, h: Math.round(short * 16 / 9) };
+  if (aspect === "1:1") return { w: short, h: short };
+  return { w: Math.round(short * 16 / 9), h: short };
+}
+
+function applySize() {
+  const { w, h } = sizeFor($("aspect").value, $("res").value);
+  canvas.width = w;
+  canvas.height = h;
+  drawAt(0);
+}
+$("aspect").addEventListener("change", applySize);
+$("res").addEventListener("change", applySize);
+$("per-scene").addEventListener("change", (e) => {
+  perScene = Math.max(1, Number(e.target.value) || 4);
+  renderScenes();
+  drawAt(0);
+});
+
+// add scenes
+$("images").addEventListener("change", async (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = "";
+  for (const file of files) {
+    const url = URL.createObjectURL(file);
+    const img = await loadImage(url);
+    scenes.push({ img, name: file.name, duration: perScene });
+  }
+  renderScenes();
+  drawAt(0);
+  setStatus(scenes.length + " scene" + (scenes.length === 1 ? "" : "s"));
+});
+
+function loadImage(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
+// music / voiceover for the video
+$("audio-file").addEventListener("change", async (e) => {
+  const file = (e.target.files || [])[0];
+  e.target.value = "";
+  if (!file) { audioBuffer = null; return; }
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    audioBuffer = await audioCtx.decodeAudioData(await file.arrayBuffer());
+    setStatus("Audio ready");
+  } catch (err) {
+    audioBuffer = null;
+    alert("That audio file could not be read: " + err.message);
+  }
+});
+
+function renderScenes() {
+  const wrap = $("scenes");
+  wrap.textContent = "";
+  scenes.forEach((s, i) => {
+    const el = document.createElement("div");
+    el.className = "scene";
+    const img = document.createElement("img");
+    img.src = s.img.src;
+    img.alt = s.name;
+    const num = document.createElement("span");
+    num.className = "num";
+    num.textContent = String(i + 1);
+    const ctl = document.createElement("div");
+    ctl.className = "ctl";
+    const mk = (label, title, fn) => {
+      const b = document.createElement("button");
+      b.textContent = label;
+      b.title = title;
+      b.addEventListener("click", fn);
+      return b;
+    };
+    ctl.append(
+      mk("←", "Move earlier", () => move(i, -1)),
+      mk("→", "Move later", () => move(i, 1)),
+      mk("×", "Remove", () => { scenes.splice(i, 1); renderScenes(); drawAt(0); })
+    );
+    el.append(img, num, ctl);
+    wrap.append(el);
+  });
+}
+
+function move(i, dir) {
+  const j = i + dir;
+  if (j < 0 || j >= scenes.length) return;
+  [scenes[i], scenes[j]] = [scenes[j], scenes[i]];
+  renderScenes();
+  drawAt(0);
+}
+
+function totalDuration() {
+  return scenes.reduce((sum, s) => sum + (s.duration || perScene), 0);
+}
+
+// Draw a single frame at time t. Everything below is a pure function of t,
+// so preview and recording look identical.
+function drawAt(t) {
+  const w = canvas.width, h = canvas.height;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, w, h);
+
+  if (!scenes.length) {
+    ctx.fillStyle = "#4a4a58";
+    ctx.font = "600 " + Math.round(h / 22) + "px ui-sans-serif, system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("Add images to build a video", w / 2, h / 2);
+    return;
+  }
+
+  let acc = 0;
+  let index = scenes.length - 1;
+  let local = 0;
+  for (let i = 0; i < scenes.length; i++) {
+    const d = scenes[i].duration || perScene;
+    if (t < acc + d) { index = i; local = t - acc; break; }
+    acc += d;
+  }
+  const scene = scenes[index];
+  const d = scene.duration || perScene;
+  const p = Math.min(1, Math.max(0, local / d));
+
+  drawScene(scene, p, index);
+
+  // fade through black at the edges of each scene
+  const fade = Math.min(1, local / FADE, (d - local) / FADE);
+  if (fade < 1) {
+    ctx.fillStyle = "rgba(0,0,0," + (1 - Math.max(0, fade)) + ")";
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  const caption = $("caption").value.trim();
+  if (caption) drawCaption(caption);
+}
+
+function drawScene(scene, p, index) {
+  const w = canvas.width, h = canvas.height;
+  const img = scene.img;
+  const zoomFrom = index % 2 === 0 ? 1.02 : 1.14;
+  const zoomTo = index % 2 === 0 ? 1.14 : 1.02;
+  const scale = zoomFrom + (zoomTo - zoomFrom) * p;
+  const drawW = w * scale, drawH = h * scale;
+  // cover-fit, then scale around the centre with a slight sideways drift
+  const ratio = img.width / img.height;
+  const target = w / h;
+  let bw = drawW, bh = drawH;
+  if (ratio > target) bw = drawH * ratio; else bh = drawW / ratio;
+  const drift = (p - 0.5) * w * 0.02 * (index % 2 === 0 ? 1 : -1);
+  ctx.drawImage(img, (w - bw) / 2 + drift, (h - bh) / 2, bw, bh);
+}
+
+function drawCaption(text) {
+  const w = canvas.width, h = canvas.height;
+  const size = Math.round(h / 18);
+  ctx.font = "600 " + size + "px ui-sans-serif, system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "bottom";
+  const maxWidth = w * 0.86;
+  const words = text.split(/\s+/);
+  const lines = [];
+  let line = "";
+  for (const word of words) {
+    const test = line ? line + " " + word : word;
+    if (ctx.measureText(test).width > maxWidth && line) { lines.push(line); line = word; }
+    else line = test;
+  }
+  if (line) lines.push(line);
+  const lineH = size * 1.25;
+  const baseY = h - h * 0.08;
+  lines.slice(-3).forEach((ln, i, arr) => {
+    const y = baseY - (arr.length - 1 - i) * lineH;
+    ctx.shadowColor = "rgba(0,0,0,.75)";
+    ctx.shadowBlur = size * 0.35;
+    ctx.fillStyle = "#fff";
+    ctx.fillText(ln, w / 2, y);
+    ctx.shadowBlur = 0;
+  });
+}
+
+/* ---- timeline ---- */
+
+function playTimeline(onDone) {
+  const total = totalDuration();
+  if (!total) { if (onDone) onDone(); return null; }
+  const started = performance.now();
+  playing = true;
+
+  const step = () => {
+    if (!playing) return;
+    const t = (performance.now() - started) / 1000;
+    drawAt(Math.min(t, total));
+    $("time-label").textContent = t.toFixed(1) + "s / " + total.toFixed(1) + "s";
+    $("progress").style.width = Math.min(100, (t / total) * 100) + "%";
+    if (t >= total) {
+      playing = false;
+      $("time-label").textContent = total.toFixed(1) + "s";
+      if (onDone) onDone();
+      return;
+    }
+    rafId = requestAnimationFrame(step);
+  };
+  rafId = requestAnimationFrame(step);
+  return total;
+}
+
+function stopTimeline() {
+  playing = false;
+  if (rafId) cancelAnimationFrame(rafId);
+  rafId = null;
+  if (recorder && recorder.state !== "inactive") recorder.stop();
+}
+
+$("play-btn").addEventListener("click", () => {
+  stopTimeline();
+  if (!scenes.length) { alert("Add at least one image first."); return; }
+  playAudioPreview();
+  playTimeline();
+});
+
+$("stop-btn").addEventListener("click", () => {
+  stopTimeline();
+  if (audioCtx) audioCtx.suspend().then(() => audioCtx.resume());
+  drawAt(0);
+});
+
+let previewSource = null;
+function playAudioPreview() {
+  if (!audioBuffer) return;
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  audioCtx.resume();
+  if (previewSource) { try { previewSource.stop(); } catch {} }
+  previewSource = audioCtx.createBufferSource();
+  previewSource.buffer = audioBuffer;
+  previewSource.connect(audioCtx.destination);
+  previewSource.start();
+}
+
+/* ---- recording ---- */
+
+function pickMime() {
+  const candidates = [
+    "video/mp4;codecs=avc1",
+    "video/webm;codecs=vp9",
+    "video/webm;codecs=vp8",
+    "video/webm",
+  ];
+  for (const c of candidates) {
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported(c)) return c;
+  }
+  return "";
+}
+
+$("record-btn").addEventListener("click", () => {
+  if (!scenes.length) { alert("Add at least one image first."); return; }
+  if (!window.MediaRecorder) { alert("This browser cannot record video."); return; }
+
+  const mime = pickMime();
+  if (!mime) { alert("This browser cannot record video in any format this app supports."); return; }
+
+  stopTimeline();
+  drawAt(0);
+
+  const stream = canvas.captureStream(30);
+  let sourceNode = null;
+
+  if (audioBuffer) {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    audioCtx.resume();
+    const dest = audioCtx.createMediaStreamDestination();
+    sourceNode = audioCtx.createBufferSource();
+    sourceNode.buffer = audioBuffer;
+    sourceNode.connect(dest);
+    sourceNode.connect(audioCtx.destination);
+    for (const track of dest.stream.getAudioTracks()) stream.addTrack(track);
+  }
+
+  const chunks = [];
+  const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 4_000_000 });
+  recorder = rec;
+  rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+  rec.onstop = () => {
+    if (sourceNode) { try { sourceNode.stop(); } catch {} }
+    for (const t of stream.getTracks()) t.stop();
+    if (!chunks.length) { $("video-out").textContent = "Nothing was recorded."; return; }
+    const blob = new Blob(chunks, { type: mime.split(";")[0] });
+    const ext = mime.startsWith("video/mp4") ? "mp4" : "webm";
+    download("apex-media-" + Date.now() + "." + ext, blob);
+    $("video-out").textContent = "Saved " + (blob.size / 1048576).toFixed(1) + " MB as ." + ext +
+      (ext === "webm" ? "\nWebM plays in Chrome, Android, Firefox and VLC. Some editors want MP4." : "");
+    $("record-btn").disabled = false;
+  };
+
+  $("record-btn").disabled = true;
+  $("video-out").textContent = "Recording " + totalDuration().toFixed(0) + "s in real time…";
+  setStatus("Recording");
+
+  if (sourceNode) sourceNode.start();
+  rec.start(250);
+  playTimeline(() => { if (rec.state !== "inactive") rec.stop(); setStatus("Done"); });
+});
+
+function download(filename, blob) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+/* =============================== VOICE =============================== */
+
+const synth = window.speechSynthesis;
+let voices = [];
+
+function loadVoices() {
+  if (!synth) {
+    $("voice-out").textContent = "This browser has no speech engine.";
+    return;
+  }
+  voices = synth.getVoices();
+  const pick = $("voice-pick");
+  const previous = pick.value;
+  pick.textContent = "";
+  if (!voices.length) {
+    const opt = document.createElement("option");
+    opt.textContent = "No voices installed";
+    opt.value = "";
+    pick.append(opt);
+    return;
+  }
+  voices.forEach((v, i) => {
+    const opt = document.createElement("option");
+    opt.value = String(i);
+    opt.textContent = v.name + " (" + v.lang + ")";
+    pick.append(opt);
+  });
+  if (previous && voices[Number(previous)]) pick.value = previous;
+  else {
+    // prefer a local English voice, which is the one most phones actually ship
+    const local = voices.findIndex((v) => /en/i.test(v.lang) && v.localService);
+    if (local >= 0) pick.value = String(local);
+  }
+}
+
+if (synth) {
+  loadVoices();
+  synth.addEventListener("voiceschanged", loadVoices);
+}
+
+$("speak-btn").addEventListener("click", () => {
+  if (!synth) { alert("This browser has no speech engine."); return; }
+  synth.cancel();
+  const text = $("script").value.trim();
+  if (!text) return;
+  const utter = new SpeechSynthesisUtterance(text);
+  const v = voices[Number($("voice-pick").value)];
+  if (v) { utter.voice = v; utter.lang = v.lang; }
+  utter.rate = Number($("rate").value) || 1;
+  utter.pitch = Number($("pitch").value) || 1;
+  utter.volume = Math.min(1, Math.max(0, Number($("volume").value)));
+  const words = text.split(/\s+/).length;
+  utter.onstart = () => {
+    $("voice-out").textContent = "Speaking " + words + " words…";
+    setStatus("Speaking");
+  };
+  utter.onend = () => {
+    $("voice-out").textContent = "Finished. " + words + " words.";
+    setStatus("Ready");
+  };
+  utter.onerror = (e) => {
+    $("voice-out").textContent = "Speech stopped: " + (e.error || "unknown reason");
+    setStatus("Ready");
+  };
+  synth.speak(utter);
+});
+
+$("pause-btn").addEventListener("click", () => {
+  if (!synth) return;
+  if (synth.paused) synth.resume(); else synth.pause();
+});
+
+$("cancel-btn").addEventListener("click", () => {
+  if (synth) synth.cancel();
+  $("voice-out").textContent = "Stopped.";
+});
+
+/* =============================== MUSIC =============================== */
+
+let renderedBuffer = null;
+
+const SCALES = {
+  calm:   { root: 220.00, steps: [0, 2, 4, 7, 9],  chords: [[0, 2, 4], [3, 0, 2], [4, 1, 3], [0, 2, 4]] },
+  upbeat: { root: 261.63, steps: [0, 2, 4, 5, 7, 9, 11], chords: [[0, 2, 4], [3, 5, 0], [4, 6, 1], [5, 0, 2]] },
+  dark:   { root: 174.61, steps: [0, 1, 3, 5, 7, 8, 10], chords: [[0, 2, 4], [1, 3, 5], [2, 4, 6], [0, 2, 4]] },
+};
+
+function midiToHz(root, semitones) {
+  return root * Math.pow(2, semitones / 12);
+}
+
+function noteAt(scale, degree) {
+  const len = scale.steps.length;
+  const oct = Math.floor(degree / len);
+  const idx = ((degree % len) + len) % len;
+  return midiToHz(scale.root, scale.steps[idx] + oct * 12);
+}
+
+async function generateTrack() {
+  const mood = $("mood").value;
+  const scale = SCALES[mood];
+  const bpm = Math.min(160, Math.max(50, Number($("tempo").value) || 84));
+  const seconds = Math.min(180, Math.max(5, Number($("seconds").value) || 30));
+  const withDrums = $("drums").value === "on";
+  const sr = 44100;
+
+  $("gen-btn").disabled = true;
+  $("music-out").textContent = "Rendering " + seconds + "s at " + bpm + " BPM…";
+
+  const offline = new OfflineAudioContext(2, Math.ceil(sr * seconds), sr);
+  const master = offline.createGain();
+  master.gain.value = 0.82;
+  master.connect(offline.destination);
+
+  const beat = 60 / bpm;
+  const bar = beat * 4;
+  const bars = Math.ceil(seconds / bar);
+
+  // pads: one triad per bar, slow attack and release
+  for (let b = 0; b < bars; b++) {
+    const chord = scale.chords[b % scale.chords.length];
+    const start = b * bar;
+    if (start >= seconds) break;
+    const dur = Math.min(bar * 1.05, seconds - start);
+    for (const deg of chord) {
+      const osc = offline.createOscillator();
+      const gain = offline.createGain();
+      osc.type = mood === "dark" ? "sawtooth" : "triangle";
+      osc.frequency.value = noteAt(scale, deg) * (mood === "calm" ? 1 : 1.0);
+      const peak = mood === "upbeat" ? 0.075 : 0.10;
+      gain.gain.setValueAtTime(0, start);
+      gain.gain.linearRampToValueAtTime(peak, start + Math.min(beat * 0.6, dur * 0.4));
+      gain.gain.setValueAtTime(peak, Math.max(start + 0.01, start + dur - beat * 0.5));
+      gain.gain.linearRampToValueAtTime(0.0001, start + dur);
+      // gentle detune so the chord breathes instead of sounding like a test tone
+      osc.detune.value = (Math.random() - 0.5) * 6;
+      const filter = offline.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.value = mood === "dark" ? 900 : 2200;
+      osc.connect(gain).connect(filter).connect(master);
+      osc.start(start);
+      osc.stop(start + dur + 0.05);
+    }
+
+    // bass on the downbeat
+    const bassOsc = offline.createOscillator();
+    const bassGain = offline.createGain();
+    bassOsc.type = "sine";
+    bassOsc.frequency.value = noteAt(scale, chord[0]) / 2;
+    bassGain.gain.setValueAtTime(0.22, start);
+    bassGain.gain.exponentialRampToValueAtTime(0.001, start + beat * 1.6);
+    bassOsc.connect(bassGain).connect(master);
+    bassOsc.start(start);
+    bassOsc.stop(Math.min(seconds, start + beat * 1.7));
+  }
+
+  if (withDrums) {
+    const stepsPerBar = 8;              // eighth notes
+    const totalSteps = Math.ceil(seconds / (beat / 2));
+    for (let s = 0; s < totalSteps; s++) {
+      const t = s * (beat / 2);
+      const inBar = s % stepsPerBar;
+      const barIndex = Math.floor(s / stepsPerBar);
+
+      // kick on beats 1 and 3 (steps 0 and 4)
+      if (inBar % 4 === 0) {
+        const osc = offline.createOscillator();
+        const g = offline.createGain();
+        osc.frequency.setValueAtTime(mood === "dark" ? 140 : 120, t);
+        osc.frequency.exponentialRampToValueAtTime(45, t + 0.14);
+        g.gain.setValueAtTime(0.5, t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+        osc.connect(g).connect(master);
+        osc.start(t); osc.stop(t + 0.24);
+      }
+
+      // snare on beats 2 and 4
+      if (inBar === 4) {
+        const noise = offline.createBufferSource();
+        noise.buffer = noiseBuffer(offline, 0.18);
+        const hp = offline.createBiquadFilter();
+        hp.type = "highpass"; hp.frequency.value = 1400;
+        const g = offline.createGain();
+        g.gain.setValueAtTime(0.22, t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+        noise.connect(hp).connect(g).connect(master);
+        noise.start(t);
+      }
+
+      // hats on every eighth, softer on the offbeat
+      if (barIndex % 1 === 0) {
+        const noise = offline.createBufferSource();
+        noise.buffer = noiseBuffer(offline, 0.05);
+        const hp = offline.createBiquadFilter();
+        hp.type = "highpass"; hp.frequency.value = 7000;
+        const g = offline.createGain();
+        const level = inBar % 2 === 0 ? 0.06 : 0.035;
+        g.gain.setValueAtTime(level, t);
+        g.gain.exponentialRampToValueAtTime(0.0005, t + 0.045);
+        noise.connect(hp).connect(g).connect(master);
+        noise.start(t);
+      }
+    }
+  }
+
+  renderedBuffer = await offline.startRendering();
+  $("player").src = URL.createObjectURL(new Blob([encodeWav(renderedBuffer)], { type: "audio/wav" }));
+  $("wav-btn").disabled = false;
+  const peak = peakLevel(renderedBuffer);
+  $("music-out").textContent = "Done — " + seconds + "s, " + mood + ", " + bpm + " BPM, peak "
+    + (peak * 100).toFixed(0) + "% of full scale.";
+  $("gen-btn").disabled = false;
+  setStatus("Track ready");
+}
+
+function noiseBuffer(offline, seconds) {
+  const len = Math.max(1, Math.floor(offline.sampleRate * seconds));
+  const buf = offline.createBuffer(1, len, offline.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+  return buf;
+}
+
+function peakLevel(buffer) {
+  let peak = 0;
+  for (let c = 0; c < buffer.numberOfChannels; c++) {
+    const data = buffer.getChannelData(c);
+    for (let i = 0; i < data.length; i += 512) peak = Math.max(peak, Math.abs(data[i]));
+  }
+  return peak;
+}
+
+// 16-bit PCM WAV, written by hand — no library needed for a two-channel buffer
+function encodeWav(buffer) {
+  const channels = buffer.numberOfChannels;
+  const length = buffer.length * channels * 2;
+  const out = new DataView(new ArrayBuffer(44 + length));
+  const writeStr = (offset, str) => {
+    for (let i = 0; i < str.length; i++) out.setUint8(offset + i, str.charCodeAt(i));
+  };
+  writeStr(0, "RIFF");
+  out.setUint32(4, 36 + length, true);
+  writeStr(8, "WAVE");
+  writeStr(12, "fmt ");
+  out.setUint32(16, 16, true);
+  out.setUint16(20, 1, true);                 // PCM
+  out.setUint16(22, channels, true);
+  out.setUint32(24, buffer.sampleRate, true);
+  out.setUint32(28, buffer.sampleRate * channels * 2, true);
+  out.setUint16(32, channels * 2, true);
+  out.setUint16(34, 16, true);
+  writeStr(36, "data");
+  out.setUint32(40, length, true);
+
+  const chans = [];
+  for (let c = 0; c < channels; c++) chans.push(buffer.getChannelData(c));
+  let offset = 44;
+  for (let i = 0; i < buffer.length; i++) {
+    for (let c = 0; c < channels; c++) {
+      const s = Math.max(-1, Math.min(1, chans[c][i]));
+      out.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+      offset += 2;
+    }
+  }
+  return out;
+}
+
+$("gen-btn").addEventListener("click", () => {
+  generateTrack().catch((err) => {
+    console.error(err);
+    $("music-out").textContent = "Could not generate: " + err.message;
+    $("gen-btn").disabled = false;
+  });
+});
+
+$("wav-btn").addEventListener("click", () => {
+  if (!renderedBuffer) return;
+  download("apex-track-" + Date.now() + ".wav", new Blob([encodeWav(renderedBuffer)], { type: "audio/wav" }));
+});
+
+/* ------------------------------- boot ------------------------------- */
+
+applySize();
+drawAt(0);
+renderScenes();
+</script>
+</body>
+</html>
