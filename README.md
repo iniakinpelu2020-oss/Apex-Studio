@@ -1,7 +1,8 @@
 # Apex Studio — Media Gen
 
-Make video, voice and music on your own machine. One file, `index.html`, no server, no
-account, no card, nothing uploaded.
+Make video, voice and music on your own machine. A static web app — no account, no card,
+nothing uploaded. Runtime integrations (MCP, n8n, runner) are configured in code and connect
+automatically on startup.
 
 **Status: built and working.** Three tools in one page.
 
@@ -62,11 +63,36 @@ one route, one key stored as a secret, never in this file.
 
 ## How to run it
 
-Open `index.html`, or upload that one file to Firebase Hosting, Netlify or Cloudflare Pages.
+Serve the folder over HTTP (modules do not load from `file://`):
+
+```sh
+npm install
+npm run dev
+```
+
+Or build for static hosting (Cloudflare Pages, Netlify, Firebase Hosting):
+
+```sh
+npm run build
+```
+
+Deploy the `dist/` directory. For Cloudflare Pages, set the build command to `npm run build`, the output directory to `dist`, and add `VITE_APEX_AUTH_TOKEN` in Settings → Environment variables.
+
+## Runtime integrations
+
+MCP, n8n, and Remote Runner endpoints are configured in code (`src/config/runtimeConfig.js`) and initialize automatically on startup. They are not user-configurable in the UI.
+
+Set the authorization token in your local `.env` and in Cloudflare Pages environment variables:
+
+```sh
+VITE_APEX_AUTH_TOKEN=your-token-here
+```
+
+See `.env.example`. Keep `.env` out of git.
 
 ## What you need to do
 
-Nothing. No accounts, no keys, no card.
+Add `VITE_APEX_AUTH_TOKEN` to your local `.env` and to your Cloudflare Pages project environment variables before deploying. No other accounts, keys, or manual in-app configuration are required.
 
 ## Still to build, in order
 

@@ -98,6 +98,7 @@
 <header>
   <div class="brand">Apex <span>Media Gen</span></div>
   <div class="status" id="status">Ready</div>
+  <div class="status" id="runtime-status" aria-live="polite" title="Runtime integration status"></div>
   <input id="editor-url" type="text" placeholder="Apex Editor URL (optional)" style="max-width:230px;margin-left:auto" />
   <div class="tabs" style="margin-left:0">
     <button class="tab" id="tab-video" aria-selected="true">Video</button>
@@ -1063,5 +1064,6 @@ applySize();
 drawAt(0);
 renderScenes();
 </script>
+<script type="module" src="./src/runtime/bootstrap.js"></script>
 </body>
 </html>
